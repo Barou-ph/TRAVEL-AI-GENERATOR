@@ -41,7 +41,7 @@ CASE_LIBRARY = [
 # =========================
 # ✈️ UI
 # =========================
-st.title("🏢 Team Building AI - BÁN ĐƯỢC THẬT")
+st.title("🏢 Team Building AI")
 
 tour_name = st.text_input("Tên tour")
 destinations = st.text_input("Địa điểm")
