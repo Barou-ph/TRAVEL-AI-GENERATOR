@@ -1,0 +1,187 @@
+import streamlit as st
+import os
+import sqlite3
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# =========================
+# 🔑 INIT
+# =========================
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# =========================
+# 🗄️ DATABASE
+# =========================
+conn = sqlite3.connect("content.db", check_same_thread=False)
+c = conn.cursor()
+
+c.execute(
+    """
+CREATE TABLE IF NOT EXISTS history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT,
+    content TEXT
+)
+"""
+)
+conn.commit()
+
+# =========================
+# ✈️ UI
+# =========================
+st.title("🏢 Team Building Content Generator PRO")
+
+# =========================
+# ✏️ INPUT
+# =========================
+tour_name = st.text_input("Tên tour")
+destinations = st.text_input("Địa điểm")
+price = st.text_input("Giá")
+time = st.text_input("Thời gian")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    company_size = st.selectbox("Quy mô công ty", ["<20", "20-50", "50-200", "200+"])
+    industry = st.text_input("Ngành nghề (IT, Sales, F&B...)")
+
+with col2:
+    goal = st.selectbox(
+        "Mục tiêu",
+        [
+            "Gắn kết nhân sự",
+            "Tăng động lực",
+            "Giải tỏa stress",
+            "Khen thưởng nhân viên",
+        ],
+    )
+    style = st.selectbox(
+        "Kiểu nội dung",
+        ["Bán nhanh (lead)", "Bán cao cấp (proposal)", "Chăm sóc HR (insight)"],
+    )
+
+
+# =========================
+# 🤖 GENERATE
+# =========================
+def generate_content():
+    prompt = f"""
+Bạn là chuyên gia tổ chức team building cho doanh nghiệp.
+
+Viết bài quảng cáo Facebook NHẮM VÀO HR / Manager / Chủ doanh nghiệp.
+
+Thông tin:
+- Tour: {tour_name}
+- Địa điểm: {destinations}
+- Thời gian: {time}
+- Giá: {price}
+- Quy mô: {company_size}
+- Ngành: {industry}
+- Mục tiêu: {goal}
+- Phong cách: {style}
+
+Yêu cầu:
+- Không dùng văn quảng cáo sáo rỗng (đẳng cấp, chìa khóa vàng, bứt phá...)
+- Viết như 1 người đã từng tổ chức team building cho doanh nghiệp thật
+- Có tình huống thực tế (ví dụ: team sales mất động lực sau quý thấp)
+- Nói rõ: sau chương trình doanh nghiệp nhận được gì (cụ thể)
+- Ngắn gọn, giống chia sẻ hơn là quảng cáo
+- CTA dạng gợi mở: "nếu bạn đang gặp case giống vậy, mình chia sẻ thêm"
+- 100-150 từ
+"""
+
+    res = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[
+            {"role": "system", "content": "Bạn là chuyên gia team building B2B."},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=500,
+        temperature=1,
+    )
+
+    return res.choices[0].message.content
+
+
+# =========================
+# 🚀 ACTION
+# =========================
+if st.button("🔥 Generate"):
+    if tour_name and destinations:
+        content = generate_content()
+
+        st.text_area("📄 Content", content, height=300)
+
+        # save DB
+        c.execute(
+            "INSERT INTO history (company, content) VALUES (?, ?)", (industry, content)
+        )
+        conn.commit()
+
+        # download
+        st.download_button(
+            label="⬇️ Download .txt",
+            data=content,
+            file_name="team_building_content.txt",
+            mime="text/plain",
+        )
+
+# =========================
+# 📚 HISTORY
+# =========================
+st.subheader("📚 History")
+
+rows = c.execute("SELECT * FROM history ORDER BY id DESC LIMIT 5").fetchall()
+
+for row in rows:
+    st.text(f"Ngành: {row[1]}")
+    st.code(row[2])
+
+
+def generate_sales_script(company_size, industry, goal, budget, time):
+
+    prompt = f"""
+Bạn là sales team building B2B cực giỏi.
+
+Khách hàng:
+- Quy mô: {company_size}
+- Ngành: {industry}
+- Mục tiêu: {goal}
+- Ngân sách: {budget}
+- Thời gian: {time}
+
+Hãy viết:
+
+1. Tin nhắn tư vấn (giống người thật, không robot)
+2. Gợi ý chương trình phù hợp
+3. Cách chốt deal nhẹ nhàng (CTA)
+
+Yêu cầu:
+- Không nói dài dòng
+- Đánh đúng insight doanh nghiệp
+- Tạo cảm giác chuyên nghiệp
+"""
+
+    res = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[
+            {"role": "system", "content": "Bạn là sales B2B chuyên team building"},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=400,
+        temperature=0.9,
+    )
+
+    return res.choices[0].message.content
+
+
+st.subheader("💬 Tư vấn khách (Sales Mode)")
+
+budget = st.text_input("Ngân sách dự kiến")
+sales_time = st.text_input("Thời gian tổ chức")
+
+if st.button("💰 Generate Sales Script"):
+    script = generate_sales_script(company_size, industry, goal, budget, sales_time)
+
+    st.text_area("📩 Tin nhắn chốt sale", script, height=300)
