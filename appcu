@@ -1,65 +1,108 @@
 import streamlit as st
 import os
+import re
 import sqlite3
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# =========================
-# 🔑 INIT
-# =========================
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# đặt client = tên biến OpenAI() để sử dụng API key từ .env
 
 # =========================
 # 🗄️ DATABASE
 # =========================
 conn = sqlite3.connect("content.db", check_same_thread=False)
-c = conn.cursor()
+# conn = sqlite3 là module để làm việc với SQLite, connect() tạo kết nối đến file database "content.db".
+# check_same_thread=False cho phép sử dụng kết nối này ở nhiều thread khác nhau trong Streamlit.
+c = conn.cursor()  # là con trỏ để thực thi các câu lệnh SQL.
 
 c.execute(
     """
 CREATE TABLE IF NOT EXISTS history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    company TEXT,
+    route TEXT,
     content TEXT
-)
+) 
 """
 )
-conn.commit()
-
+conn.commit()  # c.execute() thực thi câu lệnh SQL để tạo bảng "history" nếu nó chưa tồn tại, với các cột id, route và content.
+# conn.commit() lưu các thay đổi vào database sau khi tạo bảng.
 # =========================
 # ✈️ UI
 # =========================
-st.title("🏢 Team Building Content Generator PRO")
+st.title("✈️ Flight Content Generator PRO")
+#
+# =========================
+# 📄 PASTE VÉ
+# =========================
+ticket_text = st.text_area("📄 Paste vé (auto fill)")
+
+
+def extract_info(text):
+    data = {}
+
+    # FIX route logic (tránh ELE CTR)
+    valid_airports = ["HAN", "SGN", "DAD", "CXR", "PQC"]
+    airports = re.findall(r"\b([A-Z]{3})\b", text)
+    filtered = [a for a in airports if a in valid_airports]
+
+    if len(filtered) >= 2:
+        data["from"] = filtered[0]
+        data["to"] = filtered[1]
+
+    flight = re.search(r"(VN\d+)", text)
+    if flight:
+        data["flight"] = flight.group(1)
+
+    times = re.findall(r"(\d{2}:\d{2})", text)
+    if len(times) >= 2:
+        data["departure"] = times[0]
+        data["arrival"] = times[1]
+
+    date = re.search(r"(\d{2}[A-Za-z]{3}\d{4})", text)
+    if date:
+        data["date"] = date.group(1)
+
+    if "VIETNAM AIRLINES" in text.upper():
+        data["airline"] = "Vietnam Airlines"
+
+    baggage = re.search(r"(\d+PC|\d+KG)", text)
+    if baggage:
+        data["baggage"] = baggage.group(1)
+
+    price = re.search(r"Totalamount:\s*VND\s*([\d]+)", text)
+    if price:
+        raw_price = price.group(1)
+        data["price"] = f"{int(raw_price):,}".replace(",", ".")
+
+    return data
+
+
+auto = extract_info(ticket_text) if ticket_text else {}
 
 # =========================
 # ✏️ INPUT
 # =========================
-tour_name = st.text_input("Tên tour")
-destinations = st.text_input("Địa điểm")
-price = st.text_input("Giá")
-time = st.text_input("Thời gian")
-
 col1, col2 = st.columns(2)
 
 with col1:
-    company_size = st.selectbox("Quy mô công ty", ["<20", "20-50", "50-200", "200+"])
-    industry = st.text_input("Ngành nghề (IT, Sales, F&B...)")
+    from_location = st.text_input("From", auto.get("from", ""))
+    flight_number = st.text_input("Flight", auto.get("flight", ""))
+    departure_time = st.text_input("Departure", auto.get("departure", ""))
+    date = st.text_input("Date", auto.get("date", ""))
 
 with col2:
-    goal = st.selectbox(
-        "Mục tiêu",
-        [
-            "Gắn kết nhân sự",
-            "Tăng động lực",
-            "Giải tỏa stress",
-            "Khen thưởng nhân viên",
-        ],
-    )
-    style = st.selectbox(
-        "Kiểu nội dung",
-        ["Bán nhanh (lead)", "Bán cao cấp (proposal)", "Chăm sóc HR (insight)"],
-    )
+    to_location = st.text_input("To", auto.get("to", ""))
+    airline = st.text_input("Airline", auto.get("airline", ""))
+    arrival_time = st.text_input("Arrival", auto.get("arrival", ""))
+    baggage = st.text_input("Baggage", auto.get("baggage", ""))
+
+price = st.text_input("Price", auto.get("price", ""))
+
+style = st.selectbox(
+    "Style", ["Flash sale", "Giá rẻ", "Vé gấp", "Giờ đẹp", "Storytelling", "Công tác"]
+)
 
 
 # =========================
@@ -67,38 +110,44 @@ with col2:
 # =========================
 def generate_content():
     prompt = f"""
-Bạn là chuyên gia tổ chức team building cho doanh nghiệp.
+Bạn là copywriter top 1% chuyên bán vé máy bay.
 
-Viết bài quảng cáo Facebook NHẮM VÀO HR / Manager / Chủ doanh nghiệp.
+Viết bài quảng cáo Facebook CHẤT LƯỢNG CAO.
 
 Thông tin:
-- Tour: {tour_name}
-- Địa điểm: {destinations}
-- Thời gian: {time}
-- Giá: {price}
-- Quy mô: {company_size}
-- Ngành: {industry}
-- Mục tiêu: {goal}
-- Phong cách: {style}
+- Hành trình: {from_location} → {to_location}
+- Hãng bay: {airline}
+- Số hiệu: {flight_number}
+- Giờ bay: {departure_time} - {arrival_time}
+- Ngày: {date}
+- Giá: {price} VND
+- Hành lý: {baggage}
+
+Phong cách: {style}
 
 Yêu cầu:
-- Không dùng văn quảng cáo sáo rỗng (đẳng cấp, chìa khóa vàng, bứt phá...)
-- Viết như 1 người đã từng tổ chức team building cho doanh nghiệp thật
-- Có tình huống thực tế (ví dụ: team sales mất động lực sau quý thấp)
-- Nói rõ: sau chương trình doanh nghiệp nhận được gì (cụ thể)
-- Ngắn gọn, giống chia sẻ hơn là quảng cáo
-- CTA dạng gợi mở: "nếu bạn đang gặp case giống vậy, mình chia sẻ thêm"
-- 100-150 từ
+- Mở đầu cực cuốn (gây chú ý ngay)
+- Viết tự nhiên như người thật, không robotic
+- Có storytelling nhẹ (đi công tác, về quê, du lịch gấp...)
+- Nhấn mạnh lợi ích: giờ đẹp, bay nhanh, hãng uy tín
+- Tạo FOMO (vé ít, giá tăng nhanh)
+- Emoji hợp lý
+- CTA khiến khách muốn inbox ngay
+- 180-250 từ
+- 3-5 hashtag
 """
 
     res = client.chat.completions.create(
         model="gpt-4.1",
         messages=[
-            {"role": "system", "content": "Bạn là chuyên gia team building B2B."},
+            {
+                "role": "system",
+                "content": "Bạn là chuyên gia bán vé máy bay với content chuyển đổi cực cao.",
+            },
             {"role": "user", "content": prompt},
         ],
-        max_tokens=500,
-        temperature=1,
+        max_tokens=600,
+        temperature=1.1,
     )
 
     return res.choices[0].message.content
@@ -108,14 +157,18 @@ Yêu cầu:
 # 🚀 ACTION
 # =========================
 if st.button("🔥 Generate"):
-    if tour_name and destinations:
+    if from_location and to_location:
+
+        st.write(f"✈️ Route detect: {from_location} → {to_location}")
+
         content = generate_content()
 
         st.text_area("📄 Content", content, height=300)
 
         # save DB
         c.execute(
-            "INSERT INTO history (company, content) VALUES (?, ?)", (industry, content)
+            "INSERT INTO history (route, content) VALUES (?, ?)",
+            (f"{from_location}-{to_location}", content),
         )
         conn.commit()
 
@@ -123,7 +176,7 @@ if st.button("🔥 Generate"):
         st.download_button(
             label="⬇️ Download .txt",
             data=content,
-            file_name="team_building_content.txt",
+            file_name="content.txt",
             mime="text/plain",
         )
 
@@ -135,53 +188,5 @@ st.subheader("📚 History")
 rows = c.execute("SELECT * FROM history ORDER BY id DESC LIMIT 5").fetchall()
 
 for row in rows:
-    st.text(f"Ngành: {row[1]}")
+    st.text(f"{row[1]}")
     st.code(row[2])
-
-
-def generate_sales_script(company_size, industry, goal, budget, time):
-
-    prompt = f"""
-Bạn là sales team building B2B cực giỏi.
-
-Khách hàng:
-- Quy mô: {company_size}
-- Ngành: {industry}
-- Mục tiêu: {goal}
-- Ngân sách: {budget}
-- Thời gian: {time}
-
-Hãy viết:
-
-1. Tin nhắn tư vấn (giống người thật, không robot)
-2. Gợi ý chương trình phù hợp
-3. Cách chốt deal nhẹ nhàng (CTA)
-
-Yêu cầu:
-- Không nói dài dòng
-- Đánh đúng insight doanh nghiệp
-- Tạo cảm giác chuyên nghiệp
-"""
-
-    res = client.chat.completions.create(
-        model="gpt-4.1",
-        messages=[
-            {"role": "system", "content": "Bạn là sales B2B chuyên team building"},
-            {"role": "user", "content": prompt},
-        ],
-        max_tokens=400,
-        temperature=0.9,
-    )
-
-    return res.choices[0].message.content
-
-
-st.subheader("💬 Tư vấn khách (Sales Mode)")
-
-budget = st.text_input("Ngân sách dự kiến")
-sales_time = st.text_input("Thời gian tổ chức")
-
-if st.button("💰 Generate Sales Script"):
-    script = generate_sales_script(company_size, industry, goal, budget, sales_time)
-
-    st.text_area("📩 Tin nhắn chốt sale", script, height=300)
